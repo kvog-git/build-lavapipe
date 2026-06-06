@@ -22,7 +22,7 @@ See [`examples/example_direct_driver_loading.c`](/examples/example_direct_driver
 
 Release artifacts are cryptographically signed and can be verified with [`gh attestation verify`](https://cli.github.com/manual/gh_attestation_verify):
 
-```sh
+```
 $ gh attestation verify --owner kvog-git ./vulkan_lvp_arm64.dll 
 Loaded digest sha256:db1341d2d86ad4b80f9300cab0e8f7a78c6be7002ced094a325c7424d00d7a95 for file://vulkan_lvp_arm64.dll
 Loaded 1 attestation from GitHub API

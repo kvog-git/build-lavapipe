@@ -1,0 +1,143 @@
+name: build-lavapipe
+
+on:
+  push:
+    branches:
+      - '**'
+    tags:
+      - '**'
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: build (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          - arch: arm64
+            llvm-arch: aarch64
+            llvm-hash: 9957fee5aeba5f88369c37e127a07034eaa806c2e9e996b14ce5a32a9320653f
+            runner: windows-11-arm
+            vk-sdk-installer: https://sdk.lunarg.com/sdk/download/1.4.350.0/warm/vulkansdk-windows-ARM64-1.4.350.0.exe
+          - arch: x64
+            llvm-arch: x86_64
+            llvm-hash: 3b568b5be1443d1a04c63261fa3a7aed16e126a8ed2196a1032aa8ed602144bd
+            runner: windows-latest
+            vk-sdk-installer: https://sdk.lunarg.com/sdk/download/1.4.350.0/windows/vulkansdk-windows-X64-1.4.350.0.exe
+
+    env:
+      LLVM_VER: 22.1.7
+      MESA_SHA: bac2bca9121897a2b8162e79636b50ac998fca799c8e6cf914edd85962babdf0
+      MESA_VER: 26.1.2
+
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+
+      - name: install python dependencies
+        shell: cmd
+        run: pip install mako meson pyyaml
+
+      - name: install vulkan sdk
+        shell: cmd
+        run: |
+          curl -fL -o vulkan-sdk.exe ${{ matrix.vk-sdk-installer }} || exit /b 1
+          vulkan-sdk.exe --root %cd%\vulkan-${{ matrix.arch }} --accept-licenses --default-answer --confirm-command install com.lunarg.vulkan.core || exit /b 1
+
+      - name: download mesa
+        shell: bash
+        run: |
+          url="https://archive.mesa3d.org/mesa-$MESA_VER.tar.xz"
+          tar="$(basename "$url")"
+          curl -L -o "$tar" "$url"
+          echo "$MESA_SHA  $tar" | sha256sum --check -
+          mkdir -p mesa
+          tar -xf "$tar" -C mesa --strip-components=1
+
+      - name: download prebuilt llvm
+        shell: bash
+        run: |
+          url="https://github.com/llvm/llvm-project/releases/download/llvmorg-$LLVM_VER/clang+llvm-$LLVM_VER-${{ matrix.llvm-arch }}-pc-windows-msvc.tar.xz"
+          tar="$(basename "$url")"
+          curl -L -o "$tar" "$url"
+          echo "${{ matrix.llvm-hash }}  $tar" | sha256sum --check -
+          mkdir -p llvm-${{ matrix.arch }}
+          tar -xf "$tar" -C llvm-${{ matrix.arch }} --strip-components=1
+
+      - name: Build
+        shell: cmd
+        run: |
+          setlocal enabledelayedexpansion
+          set PATH=%cd%\llvm-${{ matrix.arch }}\bin;%PATH%
+          set PATH=%cd%\vulkan-${{ matrix.arch }}\bin;%PATH%
+          
+          echo ::group::Activating Visual Studio environment (${{ matrix.arch }})
+            set VSCMD_SKIP_SENDTELEMETRY=1
+            if "%VS%" equ "" (
+              for /f "tokens=*" %%i in ('"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -requires Microsoft.VisualStudio.Workload.NativeDesktop -property installationPath') do set VS=%%i
+            )
+            if "!VS!" equ "" (
+              echo ERROR: Visual Studio installation not found^^!
+              exit /b 1
+            )
+
+            call "!VS!\Common7\Tools\VsDevCmd.bat" -arch=${{ matrix.arch }} -host_arch=${{ matrix.arch }} -startdir=none -no_logo || exit /b 1
+
+            cl.exe
+          echo ::endgroup::
+
+          echo ::group::Building Mesa
+            meson setup build-mesa-${{ matrix.arch }} mesa ^
+              --prefix=%GITHUB_WORKSPACE%/prefix-${{ matrix.arch }} ^
+              -Dbuildtype=release ^
+              -Dgallium-drivers="" ^
+              -Dvulkan-drivers=swrast ^
+              -Dopengl=false ^
+              -Degl=disabled ^
+              -Dwerror=false ^
+              -Dc_args="-wd4189 -wd4319" ^
+              -Dcpp_link_args="/LIBPATH:C:\Proj\mesabuild\libxml2-prefix\lib" ^
+              -Db_vscrt=mt
+            ninja -C build-mesa-${{ matrix.arch }}
+            ninja -C build-mesa-${{ matrix.arch }} install
+          echo ::endgroup::
+
+      - name: stage artifacts
+        shell: cmd
+        run: copy prefix-${{ matrix.arch }}\bin\vulkan_lvp.dll vulkan_lvp_${{ matrix.arch }}.dll
+
+      - name: upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: lavapipe-${{ matrix.arch }}
+          path: vulkan_lvp_*.dll
+
+  release:
+    name: release
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+
+    steps:
+      - name: download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: attest dlls
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: artifacts/**/*.dll
+
+      - name: create release and upload dlls
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          files: artifacts/**/*.dll
+          generate_release_notes: true

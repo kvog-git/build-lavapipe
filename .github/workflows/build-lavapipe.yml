@@ -97,7 +97,6 @@ jobs:
               -Degl=disabled ^
               -Dwerror=false ^
               -Dc_args="-wd4189 -wd4319" ^
-              -Dcpp_link_args="/LIBPATH:C:\Proj\mesabuild\libxml2-prefix\lib" ^
               -Db_vscrt=mt
             ninja -C build-mesa-${{ matrix.arch }}
             ninja -C build-mesa-${{ matrix.arch }} install

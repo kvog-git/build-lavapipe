@@ -102,6 +102,50 @@ jobs:
         shell: cmd
         run: copy prefix-${{ matrix.arch }}\bin\vulkan_lvp.dll vulkan_lvp_${{ matrix.arch }}.dll
 
+      - name: test
+        shell: cmd
+        run: |
+          setlocal enabledelayedexpansion
+          set PATH=%cd%\llvm-${{ matrix.arch }}\bin;%PATH%
+          set PATH=%cd%\vulkan-${{ matrix.arch }}\bin;%PATH%
+
+          echo ::group::Activating Visual Studio environment (${{ matrix.arch }})
+            set VSCMD_SKIP_SENDTELEMETRY=1
+            if "%VS%" equ "" (
+              for /f "tokens=*" %%i in ('"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -requires Microsoft.VisualStudio.Workload.NativeDesktop -property installationPath') do set VS=%%i
+            )
+            if "!VS!" equ "" (
+              echo ERROR: Visual Studio installation not found^^!
+              exit /b 1
+            )
+
+            call "!VS!\Common7\Tools\VsDevCmd.bat" -arch=${{ matrix.arch }} -host_arch=${{ matrix.arch }} -startdir=none -no_logo || exit /b 1
+
+            cl.exe
+          echo ::endgroup::
+
+          echo ::group::Building direct driver loading test
+            cl /W4 /Od /Zi examples\example_direct_driver_loading.c /Fe:test_direct_driver_loading.exe ^
+              /I "%cd%\vulkan-${{ matrix.arch }}\Include" /link /LIBPATH:"%cd%\vulkan-${{ matrix.arch }}\Lib" || exit /b 1
+          echo ::endgroup::
+
+          echo ::group::Running direct driver loading test
+            test_direct_driver_loading.exe > test_output.txt
+            set TEST_EXIT=!ERRORLEVEL!
+            type test_output.txt
+
+            if !TEST_EXIT! neq 0 (
+              echo ERROR: test app exited with code !TEST_EXIT!^^!
+              exit /b 1
+            )
+
+            findstr /C:"VK_PHYSICAL_DEVICE_TYPE_CPU" test_output.txt >nul
+            if errorlevel 1 (
+              echo ERROR: Lavapipe did not report a CPU device ^^- driver may not be working^^!
+              exit /b 1
+            )
+          echo ::endgroup::
+
       - name: upload artifacts
         uses: actions/upload-artifact@v4
         with:

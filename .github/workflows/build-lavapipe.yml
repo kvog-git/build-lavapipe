@@ -24,8 +24,8 @@ jobs:
 
     env:
       LLVM_VER: 22.1.7
-      MESA_SHA: 79e421c7ce18cd9e790b8375920325779f10798630bf30e0b22f1a21c8617122
-      MESA_VER: 26.1.5
+      MESA_SHA: 5296b88a0f1e012e2cb9ada150a2bbadf728ca81e5a4fb2ab43c83a4d2158606
+      MESA_VER: 26.1.6
 
     steps:
       - name: checkout
